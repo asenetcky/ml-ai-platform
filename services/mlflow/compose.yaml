@@ -1,0 +1,70 @@
+services:
+  # 1. Database for MLflow Metadata
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    container_name: mlflow-db
+    environment:
+      POSTGRES_USER: ${PG_USER:-mlflow}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-mlflowpassword}
+      POSTGRES_DB: ${PG_DB:-mlflow}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - internal-backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-mlflow} -d ${PG_DB:-mlflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Tailscale Sidecar (Handles Networking)
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: mlflow-tailscale
+    hostname: ${TS_HOSTNAME:-mlflow-server}
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_EXTRA_ARGS=--advertise-tags=tag:container
+    volumes:
+      - ts_state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+    networks:
+      - internal-backend
+  # 3. MLflow Server
+  mlflow:
+    build: .                 
+    container_name: mlflow-server
+    restart: unless-stopped
+    depends_on:
+      tailscale:
+        condition: service_started
+      db:
+        condition: service_healthy
+    network_mode: service:tailscale
+    environment:
+      - BACKEND_STORE_URI=postgresql://${PG_USER:-mlflow}:${PG_PASSWORD:-mlflowpassword}@db:5432/${PG_DB:-mlflow}
+      - ARTIFACT_ROOT=/mlflow/artifacts
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql://${PG_USER:-mlflow}:${PG_PASSWORD:-mlflowpassword}@db:5432/${PG_DB:-mlflow}
+      --default-artifact-root /mlflow/artifacts
+      --allowed-hosts "*"
+      --cors-allowed-origins "*"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+
+volumes:
+  pg_data:
+  ts_state:
+  mlflow_artifacts:
+
+networks:
+  internal-backend:
