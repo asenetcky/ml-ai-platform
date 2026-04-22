@@ -1,1 +1,6 @@
 *.env
+
+# ollama/ ts config
+config/
+ollama-data/
+ts/
