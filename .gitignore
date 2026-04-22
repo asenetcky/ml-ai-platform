@@ -1,6 +1,11 @@
 *.env
 
-# ollama/ ts config
+# ts config
 config/
-ollama-data/
 ts/
+
+# ollama/ 
+ollama-data/
+
+# open webui / ts config
+open-webui-data/
