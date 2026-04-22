@@ -19,3 +19,5 @@ from Tailscale's youtube videos with Alex K.
 
 - link Tailscale videos
 - add instructions e.g. tailscale serve the ports etc...
+
+Much of this was borrowed from the amazing [ScaleTail](https://github.com/tailscale-dev/ScaleTail/t) repo.
