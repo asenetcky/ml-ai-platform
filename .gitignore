@@ -9,3 +9,6 @@ ollama-data/
 
 # open webui / ts config
 open-webui-data/
+
+# mlflow
+mlflow-data/

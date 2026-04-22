@@ -1,70 +1,77 @@
-services:
-  # 1. Database for MLflow Metadata
-  db:
-    image: postgres:15
-    restart: unless-stopped
-    container_name: mlflow-db
-    environment:
-      POSTGRES_USER: ${PG_USER:-mlflow}
-      POSTGRES_PASSWORD: ${PG_PASSWORD:-mlflowpassword}
-      POSTGRES_DB: ${PG_DB:-mlflow}
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    networks:
-      - internal-backend
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-mlflow} -d ${PG_DB:-mlflow}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+configs:
+  ts-serve:
+    content: |
+      {"TCP":{"443":{"HTTPS":true}},
+      "Web":{"$${TS_CERT_DOMAIN}:443":
+          {"Handlers":{"/":
+          {"Proxy":"http://127.0.0.1:5000"}}}},
+      "AllowFunnel":{"$${TS_CERT_DOMAIN}:443":false}}
 
-  # 2. Tailscale Sidecar (Handles Networking)
+services:
+  # Make sure you have updated/checked the .env file with the correct variables.
+  # All the ${ xx } need to be defined there.
+
+  # Tailscale Sidecar Configuration
   tailscale:
-    image: tailscale/tailscale:latest
-    container_name: mlflow-tailscale
-    hostname: ${TS_HOSTNAME:-mlflow-server}
+    image: tailscale/tailscale:latest # Image to be used
+    container_name: tailscale-${SERVICE} # Name for local container management
+    hostname: ${SERVICE} # Name used within your Tailscale environment
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY}
       - TS_STATE_DIR=/var/lib/tailscale
-      - TS_EXTRA_ARGS=--advertise-tags=tag:container
+      - TS_SERVE_CONFIG=/config/serve.json # Tailscale Serve configuration to expose the web interface on your local Tailnet - remove this line if not required
+      - TS_USERSPACE=false
+      - TS_ENABLE_HEALTH_CHECK=true # Enable healthcheck endpoint: "/healthz"
+      - TS_LOCAL_ADDR_PORT=127.0.0.1:41234 # The <addr>:<port> for the healthz endpoint
+      - TS_AUTH_ONCE=true
+      # - TS_ACCEPT_DNS=true # Uncomment when using MagicDNS
+    configs:
+      - source: ts-serve
+        target: /config/serve.json
     volumes:
-      - ts_state:/var/lib/tailscale
-      - /dev/net/tun:/dev/net/tun
+      - ./config:/config # Config folder used to store Tailscale files
+      - ./ts/state:/var/lib/tailscale # Tailscale requirement
+    devices:
+      - /dev/net/tun:/dev/net/tun # Network configuration for Tailscale to work
     cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    restart: unless-stopped
-    networks:
-      - internal-backend
-  # 3. MLflow Server
-  mlflow:
-    build: .                 
-    container_name: mlflow-server
-    restart: unless-stopped
-    depends_on:
-      tailscale:
-        condition: service_started
-      db:
-        condition: service_healthy
-    network_mode: service:tailscale
+      - net_admin # Tailscale requirement
+    #ports:
+    #  - 0.0.0.0:${SERVICEPORT}:${SERVICEPORT} # Binding port ${SERVICEPORT} to the local network - may be removed if only exposure to your Tailnet is required
+    # If any DNS issues arise, use your preferred DNS provider by uncommenting the config below
+    #dns:
+    #  - ${DNS_SERVER}
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://127.0.0.1:41234/healthz" ] # Check Tailscale has a Tailnet IP and is operational
+      interval: 1m # How often to perform the check
+      timeout: 10s # Time to wait for the check to succeed
+      retries: 3 # Number of retries before marking as unhealthy
+      start_period: 10s # Time to wait before starting health checks
+    restart: always
+
+  # MLflow Tracking Server
+  application:
+    image: ${IMAGE_URL} # Image to be used
+    network_mode: service:tailscale # Sidecar configuration to route MLflow through Tailscale
+    container_name: app-${SERVICE} # Name for local container management
     environment:
-      - BACKEND_STORE_URI=postgresql://${PG_USER:-mlflow}:${PG_PASSWORD:-mlflowpassword}@db:5432/${PG_DB:-mlflow}
-      - ARTIFACT_ROOT=/mlflow/artifacts
+      - TZ=${TZ}
     command: >
       mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri postgresql://${PG_USER:-mlflow}:${PG_PASSWORD:-mlflowpassword}@db:5432/${PG_DB:-mlflow}
+      --backend-store-uri sqlite:////mlflow/mlflow.db
       --default-artifact-root /mlflow/artifacts
-      --allowed-hosts "*"
-      --cors-allowed-origins "*"
+      --allowed-hosts ${ALLOWED_HOSTS}
+      --cors-allowed-origins ${CORS_ALLOWED_ORIGINS}
     volumes:
-      - mlflow_artifacts:/mlflow/artifacts
-
-volumes:
-  pg_data:
-  ts_state:
-  mlflow_artifacts:
-
-networks:
-  internal-backend:
+      - ./${SERVICE}-data:/mlflow # Stores the SQLite metadata DB and artifacts (models, plots, files)
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "pgrep", "-f", "mlflow" ] # Check if MLflow process is running
+      interval: 1m # How often to perform the check
+      timeout: 10s # Time to wait for the check to succeed
+      retries: 3 # Number of retries before marking as unhealthy
+      start_period: 30s # Time to wait before starting health checks
+    restart: always
