@@ -1,0 +1,25 @@
+name: Validate Compose Files
+
+on:
+  pull_request:
+    paths:
+      - "services/**/compose.yaml"
+      - "services/**/.env-example"
+
+jobs:
+  validate:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [ollama, open-webui, mlflow]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy env-example to .env
+        working-directory: services/${{ matrix.service }}
+        run: cp .env-example .env
+
+      - name: Validate compose file
+        working-directory: services/${{ matrix.service }}
+        run: docker compose config --quiet

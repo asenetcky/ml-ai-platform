@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Ollama
+  - package-ecosystem: docker
+    directory: /services/ollama
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(ollama)"
+
+  # Open WebUI
+  - package-ecosystem: docker
+    directory: /services/open-webui
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(open-webui)"
+
+  # MLflow
+  - package-ecosystem: docker
+    directory: /services/mlflow
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(mlflow)"
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(actions)"
